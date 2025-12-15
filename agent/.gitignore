@@ -1,0 +1,6 @@
+venv/
+__pycache__/
+screenshots/
+models/
+*.pyc
+.DS_Store

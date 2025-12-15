@@ -1,0 +1,2 @@
+Instruction: Open the browser and search for antigravity
+Data: {'action': 'generated_by_model', 'text': 'Open the browser and search for antigravity'}

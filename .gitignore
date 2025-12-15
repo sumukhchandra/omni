@@ -1,0 +1,11 @@
+__pycache__/
+venv/
+my_env/
+.env
+.DS_Store
+node_modules/
+dist/
+.gemini/
+.agent/
+agent/vosk-small-en-us-0.15.zip
+backend/Models/
