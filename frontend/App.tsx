@@ -48,6 +48,8 @@ const App: React.FC = () => {
   // Sidebar State (Unified for mobile/desktop toggle)
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
+  // Voice Agent State (Global to prevent excessive greeting on remounts)
+  const [hasGreeted, setHasGreeted] = useState(false);
 
   // --- Derived State ---
   const currentSession = sessions.find(s => s.id === currentSessionId);
@@ -271,6 +273,9 @@ const App: React.FC = () => {
             messages={currentSession.messages}
             isLoading={!!streamingMessageId}
             onSendMessage={handleSendMessage}
+            user={user}
+            hasGreeted={hasGreeted}
+            setHasGreeted={setHasGreeted}
           />
         ) : (
           <WelcomeScreen onStartChat={handleSendMessage} />

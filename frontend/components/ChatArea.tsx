@@ -1,27 +1,43 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { Send, Bot, User as UserIcon, Loader2, RotateCcw, Mic, MicOff } from 'lucide-react';
-import { Message } from '../types';
-import useSpeechRecognition from '../src/hooks/useSpeechRecognition';
+import { Message, User } from '../types';
+
+import { useVoiceAgent } from '../src/hooks/useVoiceAgent';
 
 interface ChatAreaProps {
   messages: Message[];
   isLoading: boolean;
   onSendMessage: (text: string) => void;
+  user?: User | null;
+  hasGreeted: boolean;
+  setHasGreeted: (value: boolean) => void;
 }
 
-const ChatArea: React.FC<ChatAreaProps> = ({ messages, isLoading, onSendMessage }) => {
+const ChatArea: React.FC<ChatAreaProps> = ({ messages, isLoading, onSendMessage, user, hasGreeted, setHasGreeted }) => {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const { isListening, transcript, startListening, resetTranscript } = useSpeechRecognition();
+  /* New Voice Agent Hook Integration */
+  const { state: voiceState, feedback, error, transcript, startAgent, stopAgent } = useVoiceAgent({
+    onCommand: (text) => {
+      onSendMessage(text);
+    },
+    userName: user?.name || 'User',
+    hasGreeted,
+    setHasGreeted
+  });
 
+  // Auto-start listening on mount (optional - strictly following "always on" request)
+  // Auto-start listening on mount (optional - strictly following "always on" request)
   useEffect(() => {
-    if (transcript) {
-      const finalMessage = input + (input ? ' ' : '') + transcript;
-      onSendMessage(finalMessage);
-      setInput('');
-      resetTranscript();
-    }
-  }, [transcript, resetTranscript, input, onSendMessage]);
+    // Attempt to start the agent automatically. 
+    // Browser may block this if interaction hasn't happened yet, but we try anyway.
+    const timer = setTimeout(() => {
+      startAgent();
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const isListening = voiceState !== 'STOPPED';
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -102,11 +118,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({ messages, isLoading, onSendMessage 
             />
             <button
               type="button"
-              onClick={startListening}
+              onClick={isListening ? stopAgent : () => startAgent(true)}
               className={`absolute right-12 p-2 rounded-lg transition-colors ${isListening
                 ? 'bg-red-500 text-white animate-pulse'
                 : 'text-slate-400 hover:text-brand-600'
                 }`}
+              title={feedback || "Start Voice Agent"}
             >
               {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
             </button>
@@ -118,7 +135,16 @@ const ChatArea: React.FC<ChatAreaProps> = ({ messages, isLoading, onSendMessage 
               {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
             </button>
           </form>
-          <div className="text-center mt-2">
+          <div className="text-center mt-2 flex flex-col items-center gap-1">
+            {voiceState !== 'IDLE' && (
+              <span className="text-xs font-medium text-brand-600 animate-pulse">
+                {error ? <span className="text-red-500">{error}</span> :
+                  (feedback || (voiceState === 'WAKE_WORD_DETECTED' ? "Hey User, how can I help?" :
+                    // Always show what is being heard to debug "Not Responding" issues
+                    transcript ? `Hearing: "${transcript}"` : "Listening for 'Hey Atom'..."))
+                }
+              </span>
+            )}
             <p className="text-xs text-slate-400">
               BlueMind AI can make mistakes. Verify important information.
             </p>

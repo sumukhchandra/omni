@@ -1,2 +1,2 @@
-Instruction: Open the browser and search for antigravity
-Data: {'action': 'generated_by_model', 'text': 'Open the browser and search for antigravity'}
+Instruction: if it is windows click windows buttion then search for the browser and search for antigravity then open it/ it it is mack click Command-Spacebar buttion then search for the browser and search for antigravity then open it
+Data: {'action': 'open_app', 'app': 'the browser and search for antigravity'}

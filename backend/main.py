@@ -4,22 +4,53 @@ import json
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
-# Ensure ai_core and executor are in path
-sys.path.append(os.path.join(os.path.dirname(__file__), 'ai_core'))
-sys.path.append(os.path.join(os.path.dirname(__file__), 'executor'))
+# Ensure root path is accessible to import siblings
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.append(os.path.join(ROOT_DIR, 'atom'))
+sys.path.append(os.path.join(ROOT_DIR, 'agent'))
+sys.path.append(ROOT_DIR) # Allow importing 'AI' folder
+
+# Decoupled Imports to allow partial functionality
+try:
+    from executor.actions import execute_verbose_command
+except ImportError as e:
+    print(f"Error importing executor: {e}")
+    execute_verbose_command = None
+
+# Import Deep Brain Shim
+try:
+    from AI.deep_brain_shim import DeepBrainShim
+    deep_brain = DeepBrainShim()
+    print("[MAIN] Deep Brain Loaded.")
+except Exception as e:
+    print(f"Error loading Deep Brain: {e}")
+    deep_brain = None
 
 try:
-    from pipeline import get_pipeline
-    from actions import execute_verbose_command
+    from ai_core.pipeline import get_pipeline
 except ImportError as e:
-    print(f"Error importing modules: {e}")
-    sys.exit(1)
+    print(f"Error importing AI Brain: {e}. Fallback to Regex.")
+    get_pipeline = None
 
 app = Flask(__name__)
 CORS(app)
 
 # Initialize the AI Pipeline
-pipeline = get_pipeline()
+# --- Fallback Logic for when AI is missing ---
+# Fallback removed in favor of atom/ai_core integration
+
+# Initialize the AI Pipeline (or Fallback)
+pipeline = None
+if get_pipeline:
+    try:
+        pipeline = get_pipeline()
+        print("[MAIN] AI Pipeline Loaded successfully.")
+    except Exception as e:
+        print(f"Failed to initialize pipeline: {e}")
+
+if not pipeline:
+    print("[MAIN] Using Fallback Regex Pipeline.")
+    pipeline = FallbackPipeline()
 
 # --- Database Setup ---
 from dotenv import load_dotenv
@@ -28,7 +59,6 @@ load_dotenv()
 
 MONGO_URI = os.getenv("MONGO_URI")
 try:
-    from pymongo import MongoClient
     from pymongo import MongoClient, errors
     from werkzeug.security import generate_password_hash, check_password_hash
     
@@ -123,15 +153,73 @@ def chat():
         message = data.get('message', '')
         print(f"[MAIN] Received message: {message}")
         
-        # 1. AI BRAIN: Process request (Spell Check + Expand)
-        # pipeline returns: success, logs, action_data, strict_instruction_string
-        success, logs, action_data, instructions_str = pipeline.processed_request(text_input=message)
+        message = data.get('message', '')
+        print(f"[MAIN] Received message: {message}")
         
+        # --- MULTI-BRAIN ARCHITECTURE ---
+        # 1. ATOM (Rule-Based, Fast)
+        atom_plan = None
+        atom_data = {}
+        atom_logs = []
+        if pipeline:
+            s, l, d, p = pipeline.processed_request(text_input=message)
+            if s and p != "unknown command":
+                atom_plan = p
+                atom_data = d
+                atom_logs = l
+        
+        # 2. DEEP BRAIN (Generative, Slower)
+        deep_plan = None
+        deep_data = {}
+        deep_logs = []
+        if deep_brain:
+             s, l, d, p = deep_brain.process_request(message)
+             if s:
+                 deep_plan = p
+                 deep_data = d
+                 deep_logs = l
+
+        # 3. THE AGENT SELECTOR (Voting Logic)
+        final_plan = None
+        final_data = {}
+        logs = atom_logs + deep_logs
+        
+        if atom_plan and not deep_plan:
+            final_plan = atom_plan
+            final_data = atom_data
+            logs.append(f"[SELECTOR] Chosen: ATOM (DeepBrain failed)")
+        elif deep_plan and not atom_plan:
+            final_plan = deep_plan
+            final_data = deep_data
+            logs.append(f"[SELECTOR] Chosen: DEEP BRAIN (Atom failed)")
+        elif atom_plan and deep_plan:
+            # Conflict Resolution
+            # Atom is preferred for System Control (Speed)
+            # Deep Brain is preferred for Conversation (Richness)
+            if atom_data.get('action') in ["system", "media"]:
+                final_plan = atom_plan
+                final_data = atom_data
+                logs.append(f"[SELECTOR] Chosen: ATOM (Preferred for System Control)")
+            elif "hello" in message.lower():
+                final_plan = deep_plan # Let the LLM be polite
+                final_data = deep_data
+                logs.append(f"[SELECTOR] Chosen: DEEP BRAIN (Preferred for Conversation)")
+            else:
+                final_plan = atom_plan # Default to speed
+                logs.append(f"[SELECTOR] Chosen: ATOM (Default optimized path)")
+        else:
+            final_plan = None
+            logs.append(f"[SELECTOR] Both Brains failed.")
+
+        instructions_str = final_plan
+        action_data = final_data
+        success = True if final_plan else False
+            
         execution_logs = []
         response_text = ""
 
         # 2. AGENT EXECUTOR: Execute the verbose steps
-        if instructions_str:
+        if instructions_str and instructions_str != "unknown command":
             print(f"[MAIN] Generated Plan: {instructions_str}")
             response_text += f"Plan: {instructions_str}\n\nExecution:\n"
             
@@ -143,7 +231,13 @@ def chat():
             for i, log in enumerate(step_logs):
                 response_text += f"{i+1}. {log}\n"
         else:
-            response_text = "I could not generate a plan for that command."
+            # Check if action_data has info (like Time/Date)
+            if action_data.get("action") == "info":
+                 texto = action_data.get("text", "")
+                 response_text = texto
+                 logs.append(f"Info response: {texto}")
+            else:
+                 response_text = "I'm listening, but I didn't understand that command."
 
         return jsonify({
             "text": response_text,
