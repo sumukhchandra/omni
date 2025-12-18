@@ -24,12 +24,27 @@ export const useVoiceAgent = ({ onCommand, userName, hasGreeted, setHasGreeted }
     const stateRef = useRef<AgentState>('STOPPED');
     const recognitionRef = useRef<any>(null);
     const silenceTimerRef = useRef<any>(null);
-    const restartTimerRef = useRef<any>(null);
     const ignoreNextEnd = useRef(false);
 
     const isExplicitlyStopped = useRef(false);
     const [error, setError] = useState<string | null>(null);
-    // Removed internal hasGreetedRef in favor of prop
+
+    // Wake Lock Ref
+    const wakeLockRef = useRef<any>(null);
+
+    const requestWakeLock = async () => {
+        try {
+            if ('wakeLock' in navigator) {
+                wakeLockRef.current = await (navigator as any).wakeLock.request('screen');
+                console.log('Wake Lock active.');
+                wakeLockRef.current.addEventListener('release', () => {
+                    console.log('Wake Lock released.');
+                });
+            }
+        } catch (err) {
+            console.error(`${err} - Wake Lock failed`);
+        }
+    };
 
     // Update ref whenever state changes
     useEffect(() => {
@@ -39,7 +54,6 @@ export const useVoiceAgent = ({ onCommand, userName, hasGreeted, setHasGreeted }
     // TTS Helper
     const speak = useCallback((text: string, onEnd?: () => void) => {
         if ('speechSynthesis' in window) {
-            // Cancel current speech
             window.speechSynthesis.cancel();
 
             const utterance = new SpeechSynthesisUtterance(text);
@@ -47,13 +61,19 @@ export const useVoiceAgent = ({ onCommand, userName, hasGreeted, setHasGreeted }
             utterance.pitch = 1.0;
             utterance.volume = 1.0;
 
-            // Try to find a good voice
             const voices = window.speechSynthesis.getVoices();
-            const preferredVoice = voices.find(v => v.name.includes('Google US English') || v.name.includes('David')) || voices[0];
+            // PRIORITY: Female Voices (Zira, Google US English, Generic Female)
+            const preferredVoice = voices.find(v =>
+                v.name.includes('Zira') ||
+                v.name.includes('Google US English') ||
+                v.name.toLowerCase().includes('female')
+            ) || voices[0];
+
             if (preferredVoice) utterance.voice = preferredVoice;
 
             utterance.onstart = () => setState('SPEAKING');
-            // Safety timeout: If TTS hangs or doesn't fire onend, force it after 4 seconds
+
+            // Safety timeout
             const safetyTimeout = setTimeout(() => {
                 console.warn("TTS timed out, forcing callback");
                 if (onEnd) onEnd();
@@ -72,63 +92,72 @@ export const useVoiceAgent = ({ onCommand, userName, hasGreeted, setHasGreeted }
     }, []);
 
     const processTranscript = useCallback((text: string) => {
-        const lowerText = text.toLowerCase();
+        const lowerText = text.toLowerCase().trim();
         const currentState = stateRef.current;
 
         console.log(`[VoiceAgent] State: ${currentState}, Heard: "${lowerText}"`);
 
-        // --- 1. IDLE: Listen for Wake Word ---
-        if (currentState === 'IDLE' || currentState === 'SPEAKING' || currentState === 'STOPPED') {
-            // Also allow wake from STOPPED if we want (but usually STOPPED means OFF). 
-            // If user says "it is hearing", they are likely in IDLE.
+        // WAKE WORDS
+        const wakeWords = ['hey atom', 'hay atom', 'hi atom', 'atom', 'hay', 'hey'];
+        const isWakeWord = wakeWords.some(w => lowerText.includes(w));
 
-            // IGNORE SELF-HEARING (Simple Echo Cancellation)
-            if (lowerText.includes("how can i help") || lowerText.includes("i'm on it")) {
-                console.log("Ignored self-voice echo");
+        // --- STRICT ECHO CANCELLATION GATE ---
+        // If speaking, IGNORE ALL input unless it is a Wake Word (Interrupt)
+        if (currentState === 'SPEAKING') {
+            if (isWakeWord) {
+                console.log("Interrupting Speech!");
+                window.speechSynthesis.cancel();
+
+                // CRITICAL FIX: If we are interrupted, GO DIRECTLY TO LISTENING.
+                // Do NOT speak again (avoids "Hay Hay Hay" loop).
+                setState('LISTENING_COMMAND');
+                setTranscript('');
+                return;
+            } else {
+                console.log("Ignored input while speaking (Echo Guard).");
+                return;
+            }
+        }
+
+        // --- 1. IDLE: Listen for Wake Word ---
+        if (currentState === 'IDLE' || currentState === 'STOPPED' || currentState === 'PROCESSING') {
+
+            // IGNORE SELF-HEARING
+            if (lowerText.includes("how can i help") || lowerText.includes("i'm here") || lowerText.includes("listening")) {
                 return;
             }
 
-            if (lowerText.includes('hey atom') || lowerText.includes('hay atom') || lowerText.includes('hi atom') || lowerText.includes('hey adam')) {
+            if (isWakeWord) {
                 console.log("Wake Word Detected!");
-
-                // Stop listening briefly while speaking
-                ignoreNextEnd.current = true;
-                if (recognitionRef.current) recognitionRef.current.stop();
 
                 setState('WAKE_WORD_DETECTED');
                 setFeedback("I'm listening...");
 
                 const proceed = () => {
-                    // diverse back to listening for command
                     setState('LISTENING_COMMAND');
-                    setTranscript(''); // Clear buffer
-                    try { recognitionRef.current?.start(); } catch (e) { }
+                    setTranscript('');
                 };
 
-                // Speak response only ONCE
+                // Friendly Greeting (User Request)
                 if (!hasGreeted) {
                     setHasGreeted(true);
-                    console.log(`Greeting user: ${userName}`);
-                    speak(`Hey ${userName}, how can I help you?`, proceed);
+                    speak("Hey! I'm here.", proceed);
                 } else {
-                    // Just a short confirmation sound or immediate listen
-                    speak("Yes?", proceed);
+                    // Short friendly acknowledgement
+                    speak("Hey.", proceed);
                 }
             }
         }
 
         // --- 2. COMMAND LISTENING ---
         else if (currentState === 'LISTENING_COMMAND') {
-            // Reset silence timer on new input
             if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-
-            // Setup a silence timer: if no new speech for 2 seconds, assume command finished
             silenceTimerRef.current = setTimeout(() => {
                 finalizeCommand(lowerText);
-            }, 2000);
+            }, 3000);
         }
 
-    }, [speak]);
+    }, [speak, hasGreeted, setHasGreeted, userName]);
 
     const finalizeCommand = (cmdText: string) => {
         if (!cmdText.trim()) return;
@@ -136,23 +165,14 @@ export const useVoiceAgent = ({ onCommand, userName, hasGreeted, setHasGreeted }
         console.log(`[VoiceAgent] Finalizing Command: "${cmdText}"`);
         setState('PROCESSING');
 
-        // Stop listening
-        ignoreNextEnd.current = true;
-        if (recognitionRef.current) recognitionRef.current.stop();
-
-        // Speak "I will do it", and then RESTART listening
-        speak(`Okay ${userName}, I'm on it.`, () => {
-            // ACTION: Restart listening AFTER speaking
-            setTimeout(() => {
+        // Speak confirmation (User Request: Female Voice)
+        speak(`Okay.`, () => {
+            if (stateRef.current === 'PROCESSING') {
                 setState('IDLE');
                 setTranscript('');
-                if (!isExplicitlyStopped.current) {
-                    try { recognitionRef.current?.start(); } catch (e) { }
-                }
-            }, 1000); // 1.0s Delay to prevent self-hearing echo
+            }
         });
 
-        // Execute command parallel to speaking
         onCommand(cmdText);
     };
 
@@ -163,8 +183,8 @@ export const useVoiceAgent = ({ onCommand, userName, hasGreeted, setHasGreeted }
 
         if (SpeechRecognitionApi) {
             const recognition = new SpeechRecognitionApi();
-            recognition.continuous = true; // Always listen
-            recognition.interimResults = true; // Get Real-time results
+            recognition.continuous = true;
+            recognition.interimResults = true;
             recognition.lang = 'en-US';
 
             recognition.onresult = (event: any) => {
@@ -173,55 +193,29 @@ export const useVoiceAgent = ({ onCommand, userName, hasGreeted, setHasGreeted }
                 const text = result[0].transcript;
 
                 setTranscript(text);
-
-                // Process interim or final results
                 processTranscript(text);
             };
 
             recognition.onerror = (event: any) => {
                 console.error("Speech Error:", event.error);
-                // Auto-restart on error if intended to be always-on
                 if (event.error === 'not-allowed') {
                     setFeedback("Microphone access denied");
+                    stopAgent();
+                } else if (event.error === 'no-speech') {
+                    // console.log("No speech detected");
                 }
             };
 
             recognition.onend = () => {
-                // Check if we manually stopped it
+                console.log("Recognition Ended. Checking restart...");
                 if (ignoreNextEnd.current) {
-                    console.log("Ignored manual stop.");
                     ignoreNextEnd.current = false;
                     return;
                 }
 
-                // Auto-restart unless specifically stopped or speaking
-                if (!isExplicitlyStopped.current && stateRef.current !== 'STOPPED') {
-                    // Always try to restart if logic didn't explicitly stop it.
-                    // We rely on 'isExplicitlyStopped' to know if user pressed Stop.
-                    // Even if SPEAKING or PROCESSING, if 'onend' fired, it means mic is dead.
-                    // But if we are SPEAKING, we might want to wait?
-                    // No, reliance on the 'speak' callback in finalizeCommand handles the specific restart-after-action.
-                    // This block is for "Accidental" stops (silence, errors).
-
-                    // If we are PROCESSING/SPEAKING, 'onend' is EXPECTED (we called stop).
-                    // So we should NOT restart here, because finalizeCommand loop will do it.
-                    if (stateRef.current === 'SPEAKING' || stateRef.current === 'PROCESSING') {
-                        return;
-                    }
-
-                    restartTimerRef.current = setTimeout(() => {
-                        try {
-                            const currentState = stateRef.current;
-                            // Only restart if we are supposed to be listening (IDLE or LISTENING_COMMAND)
-                            // If we are SPEAKING, PROCESSING, or WAKE_WORD_DETECTED, let the specific logic handle the restart.
-                            if (currentState === 'IDLE' || currentState === 'LISTENING_COMMAND') {
-                                console.log("Auto-restarting recognition (Loop Guard)...");
-                                recognition.start();
-                            } else {
-                                console.log(`Skipping auto-restart, state is ${currentState}`);
-                            }
-                        } catch (e) { console.error("Restart failed", e); }
-                    }, 500);
+                if (!isExplicitlyStopped.current) {
+                    recognition.start();
+                    requestWakeLock();
                 }
             };
 
@@ -232,6 +226,8 @@ export const useVoiceAgent = ({ onCommand, userName, hasGreeted, setHasGreeted }
     const startAgent = (skipWakeWord: boolean = false) => {
         isExplicitlyStopped.current = false;
         setError(null);
+        requestWakeLock();
+
         if (recognitionRef.current) {
             try {
                 recognitionRef.current.start();
@@ -240,33 +236,27 @@ export const useVoiceAgent = ({ onCommand, userName, hasGreeted, setHasGreeted }
                     setFeedback("Listening for command...");
                 } else {
                     setState('IDLE');
-                    setFeedback("Listening...");
+                    setFeedback("Listening for 'Hay Atom'...");
                 }
             } catch (e) {
-                console.log("Already started or error", e);
-                if (skipWakeWord) {
-                    setState('LISTENING_COMMAND');
-                    setFeedback("Listening for command...");
-                }
+                console.error("Start failed:", e);
+                setError("Could not start microphone.");
             }
+        } else {
+            setError("Speech API not supported in this browser.");
         }
     };
 
     const stopAgent = () => {
         isExplicitlyStopped.current = true;
-        if (recognitionRef.current) {
-            recognitionRef.current.stop();
-            setState('STOPPED');
-            setFeedback("");
+        setState('STOPPED');
+        setFeedback("Agent Stopped");
+        if (recognitionRef.current) recognitionRef.current.stop();
+        if (wakeLockRef.current) {
+            wakeLockRef.current.release();
+            wakeLockRef.current = null;
         }
     };
 
-    return {
-        state,
-        transcript,
-        feedback,
-        error,
-        startAgent,
-        stopAgent
-    };
+    return { state, feedback, error, transcript, startAgent, stopAgent };
 };

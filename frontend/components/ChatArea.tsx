@@ -136,7 +136,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ messages, isLoading, onSendMessage,
             </button>
           </form>
           <div className="text-center mt-2 flex flex-col items-center gap-1">
-            {voiceState !== 'IDLE' && (
+            {voiceState !== 'STOPPED' && (
               <span className="text-xs font-medium text-brand-600 animate-pulse">
                 {error ? <span className="text-red-500">{error}</span> :
                   (feedback || (voiceState === 'WAKE_WORD_DETECTED' ? "Hey User, how can I help?" :

@@ -366,10 +366,38 @@ class GenericActionIntent(Intent):
             "explorer", "terminal", "cmd", "paint", "vlc"
         ]
     
+    
     def match(self, text):
-        return any(k in text for k in ["open", "search", "type", "run"])
+        return any(k in text for k in ["open", "search", "type", "run", "select", "click", "option", "tab"])
     
     def extract(self, text):
+        text = text.lower().strip()
+        
+        # Browser Control (Hotkeys)
+        if "new tab" in text:
+            return "press ctrl+t", {"action": "browser", "command": "new_tab"}
+        if "close tab" in text or "close this tab" in text:
+            return "press ctrl+w", {"action": "browser", "command": "close_tab"}
+        if "next tab" in text:
+             return "press ctrl+tab", {"action": "browser", "command": "next_tab"}
+             
+        # "Select first/second option" logic
+        if "option" in text or "result" in text:
+             count = 1
+             if "second" in text or "2nd" in text: count = 2
+             if "third" in text or "3rd" in text: count = 3
+             if "fourth" in text or "4th" in text: count = 4
+             
+             # Verbose: Tab * Count -> Enter
+             tabs = " then ".join(["press tab"] * count)
+             return f"{tabs} then press enter", {"action": "browser", "command": "select_option", "index": count}
+             
+        # Type Generic (Context Aware)
+        # If user says "type hello", we just type it. No "open notepad" needed.
+        if text.startswith("type "):
+            content = text[5:].strip()
+            return f"typr {content}", {"action": "type", "text": content}
+
         # Open App
         if text.startswith("open ") or text.startswith("run "):
             app = text.replace("open ", "").replace("run ", "").strip()
@@ -400,6 +428,10 @@ class GenericActionIntent(Intent):
         
     def generate_verbose_instruction(self, app, action_type, target):
         # Optimized for speed
+        if action_type == "search" and app == "Browser":
+             # Browser Search: New Tab -> Type -> Enter
+             return f"press ctrl+t then typr {target} then press enter"
+             
         win = f"if it is windows click windows buttion then search for {target} then open it"
         mac = f"it it is mack click Command-Spacebar buttion then search for {target} then open it"
         return f"{win}/ {mac}"
