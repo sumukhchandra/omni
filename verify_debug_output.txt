@@ -1,0 +1,6 @@
+DEBUG: Init Engine
+DEBUG: Loading file C:\Users\sumuk\OneDrive\Desktop\Forcys - Copy\temp_ocr_test.png
+DEBUG: Op Type: System.__ComObject
+ERROR: Async operation failed with status: 
+
+--- STDERR ---

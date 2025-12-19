@@ -7,17 +7,32 @@ try {
     [void][Windows.Graphics.Imaging.BitmapDecoder, Windows.Graphics.Imaging, ContentType = WindowsRuntime]
     [void][Windows.Media.Ocr.OcrEngine, Windows.Media.Ocr, ContentType = WindowsRuntime]
     [void][Windows.Storage.StorageFile, Windows.Storage, ContentType = WindowsRuntime]
+    [void][Windows.Globalization.Language, Windows.Globalization, ContentType = WindowsRuntime]
     [void][System.IO.Path]
+    Add-Type -AssemblyName System.Runtime.WindowsRuntime
     
     # Get Absolute Path
     $AbsPath = [System.IO.Path]::GetFullPath($ImagePath)
     
-    # helper to run async tasks synchronously in PS
-    function Await($Task) {
-        $Task.AsTask().GetAwaiter().GetResult()
+    function Await($AsyncOp) {
+        if ($null -eq $AsyncOp) { throw "AsyncOp is null" }
+        Write-Output "DEBUG: Awaiting $($AsyncOp)"
+        while ($AsyncOp.Status -eq "Started") {
+            try { Start-Sleep -Milliseconds 10 } catch {}
+        }
+        Write-Output "DEBUG: Status is $($AsyncOp.Status)"
+        if ($AsyncOp.Status -eq "Completed") {
+            return $AsyncOp.GetResults()
+        }
+        if ($AsyncOp.Status -eq "Error") {
+            throw $AsyncOp.ErrorCode
+        }
+        throw "Async operation failed with status: $($AsyncOp.Status)"
     }
     
     # Initialize Engine
+    Write-Output "DEBUG: Init Engine"
+    $Lang = [Windows.Globalization.Language]::new("en-US")
     $Lang = [Windows.Globalization.Language]::new("en-US")
     $Engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage($Lang)
     
@@ -27,7 +42,10 @@ try {
     }
     
     # Load File
-    $File = Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync($AbsPath))
+    Write-Output "DEBUG: Loading file $AbsPath"
+    $Op = [Windows.Storage.StorageFile]::GetFileFromPathAsync($AbsPath)
+    Write-Output "DEBUG: Op Type: $($Op.GetType().FullName)"
+    $File = Await ($Op)
     $Stream = Await ($File.OpenAsync([Windows.Storage.FileAccessMode]::Read))
     $Decoder = Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($Stream))
     $SoftwareBitmap = Await ($Decoder.GetSoftwareBitmapAsync())
@@ -35,13 +53,20 @@ try {
     # Recognize
     $Result = Await ($Engine.RecognizeAsync($SoftwareBitmap))
     
-    # Output Lines
-    $Text = ""
+    # Output JSON with Lines and Coordinates
+    $OutputList = @()
     foreach ($Line in $Result.Lines) {
-        $Text += $Line.Text + " "
+        foreach ($Word in $Line.Words) {
+            $Rect = $Word.BoundingRect
+            $OutputList += @{
+                text = $Word.Text
+                rect = @($Rect.X, $Rect.Y, $Rect.Width, $Rect.Height)
+            }
+        }
     }
     
-    Write-Output $Text
+    $JsonOutput = $OutputList | ConvertTo-Json -Compress
+    Write-Output $JsonOutput
     exit 0
 
 } catch {

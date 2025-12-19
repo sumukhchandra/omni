@@ -266,7 +266,78 @@ def execute_step(step_text):
 
     if "click on " in step:
         target = step.split("click on ")[-1].strip()
-        # Heuristic: For any "click on {target}", we use a robust Search -> Select sequence.
+        print(f"[EXECUTOR] requested click on: {target}")
+        
+        # --- OVERRIDE: General 'Press Enter' for Search Results ---
+        # User requested: "it is not only siddu it is for search result"
+        # We assume if visual click fails, we just want to select the result.
+        pass # Fallthrough to visual click first
+
+        
+        # --- NEW VISUAL CLICK LOGIC with TESSERACT ---
+        best_match = None
+        best_ratio = 0.0
+        
+        try:
+            # Re-use existing ocr() function or call directly
+            # ocr() function in this file returns image_to_data(output_type=DICT)
+            # Need to capture screen first
+            img = capture()
+            ocr_res = ocr(img) # Returns dict of lists
+            
+            # ocr_res keys: left, top, width, height, text, conf...
+            n_boxes = len(ocr_res['text'])
+            
+            from difflib import SequenceMatcher
+            target_lower = target.lower()
+            
+            for i in range(n_boxes):
+                text = ocr_res['text'][i].strip()
+                if not text: continue
+                
+                # Check confidence
+                try:
+                    conf = int(ocr_res['conf'][i])
+                except:
+                    conf = 0
+                if conf < 30: continue 
+
+                text_lower = text.lower()
+                ratio = SequenceMatcher(None, target_lower, text_lower).ratio()
+                
+                # Boost ratio if exact substring
+                if target_lower in text_lower:
+                    ratio += 0.3 # Boost for substring
+                
+                if ratio > best_ratio:
+                    best_ratio = ratio
+                    best_match = {
+                        "text": text,
+                        "rect": [ocr_res['left'][i], ocr_res['top'][i], ocr_res['width'][i], ocr_res['height'][i]]
+                    }
+                    
+            print(f"[EXECUTOR] Best visual match for '{target}': {best_match} (Score: {best_ratio:.2f})")
+            
+            # Click if found
+            if best_match and best_ratio > 0.6:
+                rect = best_match['rect'] # [x, y, w, h]
+                cx = rect[0] + rect[2] / 2
+                cy = rect[1] + rect[3] / 2
+                
+                if pyautogui:
+                    print(f"[EXECUTOR] Clicking at ({cx}, {cy})")
+                    pyautogui.moveTo(cx, cy, duration=0.5)
+                    pyautogui.click()
+                    return f"Clicked on visual match: '{best_match['text']}'"
+            else:
+                 print("[EXECUTOR] No confident visual match found. Falling back to heuristic.")
+                 
+        except Exception as e:
+            print(f"[EXECUTOR] Tesseract Visual Click Error: {e}")
+            import traceback
+            traceback.print_exc()
+
+        # --- FALLBACK TO OLD LOGIC ---
         
         if "message bar" in target:
              # Heuristic for message bar: Just wait/implicit focus
@@ -280,25 +351,12 @@ def execute_step(step_text):
                 time.sleep(0.5)
             return "Clicked Send (Enter)"
 
-        # Default "Select Item" logic (Enter -> Wait -> Tab -> Down -> Enter)
         if pyautogui:
-             pyautogui.press('enter') # 1. Submit search
-             time.sleep(2.0)          # 2. Wait for results (reduced from 4 for speed)
-             
-             if target == "the song":
-                 # Spotify Specific: "Tab" usually lands on the first result/play button
-                 pyautogui.press('tab')   
-                 time.sleep(0.5)
-                 pyautogui.press('enter') # Play/Select
-             else:
-                 # Generic Select
-                 pyautogui.press('tab')   # 3. Focus list
-                 time.sleep(0.2)
-                 pyautogui.press('down')  # 4. Select first item
-                 time.sleep(0.2)
-                 pyautogui.press('enter') # 5. Open/Select
+             # Just Press Enter (Simple Selection Fallback)
+             print(f"[EXECUTOR] Fallback for '{target}': Pressing Enter")
+             pyautogui.press('enter') 
              time.sleep(1.0)
-        return f"Selected '{target}'"
+        return f"Pressed Enter (Fallback for '{target}')"
 
     if "save it" in step or "save file" in step:
         filename = "unknown_file"

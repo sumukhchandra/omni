@@ -26,7 +26,7 @@ class WakeWordService:
         self.running = False
 
     def _listen_loop(self):
-        print(f"👂 Waiting for wake word: '{self.wake_word}'...")
+        print(f"Waiting for wake word: '{self.wake_word}'...")
         while self.running:
             try:
                 with self.microphone as source:
@@ -42,7 +42,7 @@ class WakeWordService:
                     # print(f"DEBUG: Heard '{text}'")
                     
                     if self.wake_word in text:
-                        print("⚡ Wake Word Detected!")
+                        print("Wake Word Detected!")
                         if self.on_wake:
                             self.on_wake()
                             

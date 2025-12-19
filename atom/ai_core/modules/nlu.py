@@ -137,13 +137,15 @@ class IntentRouter:
             NavigationIntent(),
             SearchIntent(),
             SocialIntent(),       
+            ScreenActionIntent(), # [NEW] Visual Actions
             GenericActionIntent() 
         ]
 
     def parse(self, text):
         lower_text = text.lower().strip()
         for intent in self.intents:
-            if intent.match(lower_text):
+            matched = intent.match(lower_text)
+            if matched:
                 result = intent.extract(lower_text)
                 if result:
                     print(f"[IntentRouter] Matched: {intent.name}")
@@ -355,6 +357,35 @@ class ProductivityIntent(Intent):
         mac = f"it it is mack click Command-Spacebar buttion then search for {app} then open it then typr {text}{save_step}"
         return f"{win}/ {mac}"
 
+class ScreenActionIntent(Intent):
+    """Handles visual actions: Click X, Find X, Search for X."""
+    def __init__(self):
+        super().__init__("ScreenAction")
+
+    def match(self, text):
+        # "click [text]", "find [text]", "search for [text]" (except "search web")
+        return any(text.startswith(k) for k in ["click ", "select ", "tap ", "press "]) or \
+               (text.startswith("search for ") and " on google" not in text)
+
+    def extract(self, text):
+        text = text.lower().strip()
+        
+        # Click/Select
+        if any(text.startswith(k) for k in ["click ", "select ", "tap ", "press "]):
+            # Remove the verb
+            for v in ["click ", "select ", "tap ", "press "]:
+                if text.startswith(v):
+                    target = text.replace(v, "").strip()
+                    return f"look for '{target}' on screen and click it", {"action": "click_text", "target": target}
+        
+        # Search For (Visual Search)
+        # "Search for Siddu" -> Click generic 'search' or 'find' button, then type 'Siddu'
+        if text.startswith("search for "):
+            query = text.replace("search for ", "").strip()
+            return f"look for search bar, click it, type '{query}'", {"action": "screen_search", "query": query}
+            
+        return None
+
 class GenericActionIntent(Intent):
     """Handles generic Open, Search, Type commands using standardized verbose flow."""
     def __init__(self):
@@ -363,7 +394,7 @@ class GenericActionIntent(Intent):
         self.known_apps = [
             "notepad", "calculator", "spotify", "chrome", "edge", "discord", 
             "slack", "files", "settings", "camera", "word", "excel", "powerpoint", 
-            "explorer", "terminal", "cmd", "paint", "vlc"
+            "explorer", "terminal", "cmd", "paint", "vlc", "code"
         ]
     
     
@@ -497,7 +528,23 @@ class GreetingIntent(Intent):
         super().__init__("Greeting")
         
     def match(self, text):
-        return any(k in text for k in ["hello", "hi ", "hey "])
+        # Strict matching: Must start with greeting word
+        # "hello world" -> True (Problematic? No, "hello world" is a greeting unless it's "type hello world")
+        # "type hello world" -> "type" is start. So checks:
+        # starts with "hello ", "hi ", "hey "
+        # OR is exactly "hello", "hi", "hey"
+        clean = text.lower().strip()
+        greetings = ["hello", "hi", "hey", "hola", "greetings"]
+        
+        # Exact match
+        if clean in greetings: return True
+        
+        # Start match (followed by space)
+        for g in greetings:
+            if clean.startswith(f"{g} "):
+                return True
+                
+        return False
         
     def extract(self, text):
         return "inform Hello! How can I help you?", {"action": "info", "text": "Hello! How can I help you?"}

@@ -50,6 +50,37 @@ const App: React.FC = () => {
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   // Voice Agent State (Global to prevent excessive greeting on remounts)
   const [hasGreeted, setHasGreeted] = useState(false);
+  const [isAgentRunning, setIsAgentRunning] = useState(false);
+
+  // Poll Agent Status
+  useEffect(() => {
+    const checkStatus = async () => {
+      try {
+        const res = await fetch('http://localhost:5000/api/agent/status');
+        const data = await res.json();
+        setIsAgentRunning(data.status === 'running');
+      } catch (e) {
+        console.error("Failed to check agent status", e);
+        setIsAgentRunning(false);
+      }
+    };
+
+    checkStatus();
+    const interval = setInterval(checkStatus, 5000); // Poll every 5s
+    return () => clearInterval(interval);
+  }, []);
+
+  const toggleAgent = async () => {
+    try {
+      const endpoint = isAgentRunning ? '/api/agent/stop' : '/api/agent/start';
+      const res = await fetch(`http://localhost:5000${endpoint}`, { method: 'POST' });
+      const data = await res.json();
+      if (data.status === 'started' || data.status === 'already_running') setIsAgentRunning(true);
+      if (data.status === 'stopped') setIsAgentRunning(false);
+    } catch (e) {
+      console.error("Failed to toggle agent", e);
+    }
+  };
 
   // --- Derived State ---
   const currentSession = sessions.find(s => s.id === currentSessionId);
@@ -246,6 +277,20 @@ const App: React.FC = () => {
             `}
           >
             <Menu className="w-5 h-5" />
+          </button>
+
+          {/* Desktop Agent Control */}
+          <button
+            onClick={toggleAgent}
+            className={`
+                ml-4 px-4 py-2 rounded-full font-medium text-sm flex items-center gap-2 transition-all shadow-sm border
+                ${isAgentRunning
+                ? 'bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-800'
+                : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'}
+              `}
+          >
+            <div className={`w-2 h-2 rounded-full ${isAgentRunning ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
+            {isAgentRunning ? 'Agent Active' : 'Start Agent'}
           </button>
 
           {/* Login/Signup Buttons - Top Right */}

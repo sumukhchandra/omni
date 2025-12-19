@@ -17,7 +17,7 @@ class AudioService:
         """
         try:
             with self.microphone as source:
-                print("🎤 Listening...")
+                print("Listening...")
                 # Short timeout to not hang forever
                 audio = self.recognizer.listen(source, timeout=5, phrase_time_limit=10)
             

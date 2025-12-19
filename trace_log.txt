@@ -1,0 +1,30 @@
+
+--- DEBUG TRACE: 'open notepad' ---
+🧠 [Knowledge Brain] Initializing...
+[NLU] Loading dataset from C:\Users\sumuk\OneDrive\Desktop\Forcys - Copy\atom\ai_core\modules\..\..\..\atom\data\nlu\nlu_dataset_50k.jsonl...
+[NLU] Loaded 471 commands.
+🧠 [Knowledge Brain] Thinking about: 'open notepad'
+[NLU] Dataset Match Found for: 'open notepad'!
+[NLU] Verbal: if it is windows click windows buttion then search for notepad then open it/ it it is mack click Command-Spacebar buttion then search for notepad then open it
+[NLU] Action Data: {'action': 'open_app', 'app': 'notepad'}
+💪 [Control Brain] Initializing Muscles...
+[CONTROL] Attempting execution...
+💪 [Control Brain] Received orders: [{'action': 'open_app', 'app': 'notepad'}]
+[CONTROL] Success: True
+[CONTROL] Logs:
+  - Executed: {'action': 'open_app', 'app': 'notepad'}
+
+--- DEBUG TRACE: 'type hello world' ---
+🧠 [Knowledge Brain] Initializing...
+[NLU] Loading dataset from C:\Users\sumuk\OneDrive\Desktop\Forcys - Copy\atom\ai_core\modules\..\..\..\atom\data\nlu\nlu_dataset_50k.jsonl...
+[NLU] Loaded 471 commands.
+🧠 [Knowledge Brain] Thinking about: 'type hello world'
+[IntentRouter] Matched: GenericAction
+[NLU] Verbal: typr hello world
+[NLU] Action Data: {'action': 'type', 'text': 'hello world'}
+💪 [Control Brain] Initializing Muscles...
+[CONTROL] Attempting execution...
+💪 [Control Brain] Received orders: [{'action': 'type', 'text': 'hello world'}]
+[CONTROL] Success: True
+[CONTROL] Logs:
+  - Executed: {'action': 'type', 'text': 'hello world'}

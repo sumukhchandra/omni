@@ -1,8 +1,10 @@
 import os
 import sys
 import json
+import subprocess
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from dotenv import load_dotenv
 
 # Ensure root path is accessible to import siblings
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -26,37 +28,21 @@ except Exception as e:
     print(f"Error loading Deep Brain: {e}")
     deep_brain = None
 
-try:
-    from ai_core.pipeline import get_pipeline
-except ImportError as e:
-    print(f"Error importing AI Brain: {e}. Fallback to Regex.")
-    get_pipeline = None
-
 app = Flask(__name__)
 CORS(app)
 
-# Initialize the AI Pipeline
-# --- Fallback Logic for when AI is missing ---
-# Fallback removed in favor of atom/ai_core integration
-
-# Initialize the AI Pipeline (or Fallback)
-pipeline = None
-if get_pipeline:
-    try:
-        pipeline = get_pipeline()
-        print("[MAIN] AI Pipeline Loaded successfully.")
-    except Exception as e:
-        print(f"Failed to initialize pipeline: {e}")
-
-if not pipeline:
-    print("[MAIN] Using Fallback Regex Pipeline.")
-    pipeline = FallbackPipeline()
+# Initialize the AI Pipeline (4-Brain Architecture)
+finalizer = None
+try:
+    from ai_core.brains.finalizer_brain import FinalizerBrain
+    finalizer = FinalizerBrain()
+    print("[MAIN] Finalizer Brain Loaded (4-Brain Architecture).")
+except ImportError as e:
+    print(f"Failed to initialize Finalizer Brain: {e}")
+    finalizer = None
 
 # --- Database Setup ---
-from dotenv import load_dotenv
-import os
 load_dotenv()
-
 MONGO_URI = os.getenv("MONGO_URI")
 try:
     from pymongo import MongoClient, errors
@@ -139,6 +125,48 @@ def login():
     else:
         return jsonify({"error": "Invalid email or password"}), 401
 
+# Global Agent Process Handle
+AGENT_PROCESS = None
+
+@app.route('/api/agent/status', methods=['GET'])
+def agent_status():
+    global AGENT_PROCESS
+    if AGENT_PROCESS and AGENT_PROCESS.poll() is None:
+        return jsonify({"status": "running", "pid": AGENT_PROCESS.pid})
+    return jsonify({"status": "stopped"})
+
+@app.route('/api/agent/start', methods=['POST'])
+def start_agent():
+    global AGENT_PROCESS
+    if AGENT_PROCESS and AGENT_PROCESS.poll() is None:
+        return jsonify({"status": "already_running", "pid": AGENT_PROCESS.pid})
+    
+    try:
+        # Launch atom/main.py as a separate process
+        atom_script = os.path.join(ROOT_DIR, 'atom', 'main.py')
+        
+        # Redirect stdout/stderr to a log file for debugging
+        log_file = open(os.path.join(ROOT_DIR, 'agent_debug.log'), 'w')
+        
+        AGENT_PROCESS = subprocess.Popen(
+            [sys.executable, atom_script], 
+            cwd=ROOT_DIR,
+            stdout=log_file,
+            stderr=subprocess.STDOUT
+        )
+        return jsonify({"status": "started", "pid": AGENT_PROCESS.pid})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/agent/stop', methods=['POST'])
+def stop_agent():
+    global AGENT_PROCESS
+    if AGENT_PROCESS and AGENT_PROCESS.poll() is None:
+        AGENT_PROCESS.terminate()
+        AGENT_PROCESS = None
+        return jsonify({"status": "stopped"})
+    return jsonify({"status": "not_running"})
+
 @app.route('/api/chat', methods=['POST'])
 def chat():
     """
@@ -153,91 +181,25 @@ def chat():
         message = data.get('message', '')
         print(f"[MAIN] Received message: {message}")
         
-        message = data.get('message', '')
-        print(f"[MAIN] Received message: {message}")
-        
-        # --- MULTI-BRAIN ARCHITECTURE ---
-        # 1. ATOM (Rule-Based, Fast)
-        atom_plan = None
-        atom_data = {}
-        atom_logs = []
-        if pipeline:
-            s, l, d, p = pipeline.processed_request(text_input=message)
-            if s and p != "unknown command":
-                atom_plan = p
-                atom_data = d
-                atom_logs = l
-        
-        # 2. DEEP BRAIN (Generative, Slower)
-        deep_plan = None
-        deep_data = {}
-        deep_logs = []
-        if deep_brain:
-             s, l, d, p = deep_brain.process_request(message)
-             if s:
-                 deep_plan = p
-                 deep_data = d
-                 deep_logs = l
-
-        # 3. THE AGENT SELECTOR (Voting Logic)
-        final_plan = None
-        final_data = {}
-        logs = atom_logs + deep_logs
-        
-        if atom_plan and not deep_plan:
-            final_plan = atom_plan
-            final_data = atom_data
-            logs.append(f"[SELECTOR] Chosen: ATOM (DeepBrain failed)")
-        elif deep_plan and not atom_plan:
-            final_plan = deep_plan
-            final_data = deep_data
-            logs.append(f"[SELECTOR] Chosen: DEEP BRAIN (Atom failed)")
-        elif atom_plan and deep_plan:
-            # Conflict Resolution
-            # Atom is preferred for System Control (Speed)
-            # Deep Brain is preferred for Conversation (Richness)
-            if atom_data.get('action') in ["system", "media"]:
-                final_plan = atom_plan
-                final_data = atom_data
-                logs.append(f"[SELECTOR] Chosen: ATOM (Preferred for System Control)")
-            elif "hello" in message.lower():
-                final_plan = deep_plan # Let the LLM be polite
-                final_data = deep_data
-                logs.append(f"[SELECTOR] Chosen: DEEP BRAIN (Preferred for Conversation)")
-            else:
-                final_plan = atom_plan # Default to speed
-                logs.append(f"[SELECTOR] Chosen: ATOM (Default optimized path)")
-        else:
-            final_plan = None
-            logs.append(f"[SELECTOR] Both Brains failed.")
-
-        instructions_str = final_plan
-        action_data = final_data
-        success = True if final_plan else False
-            
+        # --- 4-BRAIN ARCHITECTURE ---
+        # 1. FINALIZER BRAIN (The Orchestrator)
+        finalizer_response = None
+        success = False
         execution_logs = []
+        action_data = {}
+        logs = [] # Initialize logs for the new structure
         response_text = ""
 
-        # 2. AGENT EXECUTOR: Execute the verbose steps
-        if instructions_str and instructions_str != "unknown command":
-            print(f"[MAIN] Generated Plan: {instructions_str}")
-            response_text += f"Plan: {instructions_str}\n\nExecution:\n"
+        if finalizer:
+            # Finalizer executes the whole flow: Knowledge -> Vision -> Control
+            # It returns (success, response_string)
+            success, response_text = finalizer.execute(message)
+            logs.append(f"[FINALIZER] Execution Success: {success}")
+            logs.append(f"[FINALIZER] Response: {response_text}")
             
-            # Execute
-            step_logs = execute_verbose_command(instructions_str)
-            execution_logs.extend(step_logs)
-            
-            # Format execution logs for display
-            for i, log in enumerate(step_logs):
-                response_text += f"{i+1}. {log}\n"
         else:
-            # Check if action_data has info (like Time/Date)
-            if action_data.get("action") == "info":
-                 texto = action_data.get("text", "")
-                 response_text = texto
-                 logs.append(f"Info response: {texto}")
-            else:
-                 response_text = "I'm listening, but I didn't understand that command."
+             response_text = "I am lobotomized (Finalizer Brain Missing)."
+             logs.append("[ERROR] Finalizer Brain not loaded.")
 
         return jsonify({
             "text": response_text,
@@ -253,7 +215,7 @@ def chat():
 
 @app.route('/health', methods=['GET'])
 def health():
-    return jsonify({"status": "ok", "pipeline": "active" if pipeline else "inactive"})
+    return jsonify({"status": "ok", "pipeline": "active" if finalizer else "inactive"})
 
 if __name__ == '__main__':
     print("Starting Unified Backend Server on port 5000...")
